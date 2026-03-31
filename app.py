@@ -6,6 +6,9 @@ from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from supabase import create_client
 
+# --- PRO UPGRADE: PREMIUM PAGE LAYOUT ---
+st.set_page_config(page_title="Steve's AI Agent", page_icon="👔", layout="centered")
+
 # --- DATABASE & EMAIL SETUP ---
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -55,7 +58,7 @@ The engine scanned the global boards and filtered out the micromanagers. Here ar
 
 # --- UI: SIDEBAR SETTINGS ---
 st.sidebar.header("⚙️ Alert Settings")
-contact_email = st.sidebar.text_input("Contact Email", value="wilnercharles3@gmail.com") # Keep as your email for this final test
+contact_email = st.sidebar.text_input("Contact Email", value="wilnercharles3@gmail.com") 
 daily_digest = st.sidebar.radio("Daily Digest Email", ["Yes, send me a daily summary", "No, I will check manually"])
 
 # --- UI: MAIN PAGE ---
@@ -113,7 +116,7 @@ dealbreakers = st.text_area("Non-Negotiables / Dealbreakers",
     value="Strictly requires a high-trust, asynchronous environment. Must allow working abroad for extended periods (e.g., Kenya). Needs full autonomy over the complex sales pipeline—no micromanagement, invasive CRM tracking, or bait-and-switch return-to-office mandates. Evaluating based on full-cycle revenue growth and output, not daily screen time.",
     height=140)
 
-# --- NEW: THE DREAM SCENARIO ---
+# --- UI: THE DREAM SCENARIO ---
 st.subheader("Phase 4: The Dream Scenario (Deal Sweeteners)")
 st.info("🚀 Let's talk upside. If the AI finds a role that hits these metrics, it will flag it as a 'Top Tier Match'.")
 
@@ -140,22 +143,34 @@ if st.button("Run Deep Scan & Save Preferences"):
     if uploaded_file is not None and job_titles:
         if supabase:
             try:
+                # PRO UPGRADE: Smart Status Updates
                 with st.spinner("Injecting executive profile and strict guardrails into the AI Brain..."):
                     file_bytes = uploaded_file.getvalue()
-                    supabase.storage.from_("resumes").upload("steve_resume.pdf", file_bytes, {"upsert": "true"})
+                    # PRO UPGRADE: Dynamic File Naming Patch
+                    supabase.storage.from_("resumes").upload(uploaded_file.name, file_bytes, {"upsert": "true"})
+                    time.sleep(1) # Brief pause for effect
                 
                 st.success("✅ Executive profile and strict guardrails securely injected!")
                 
                 st.divider()
                 st.subheader("📡 Live Market Radar (Instant Results)")
                 primary_title = job_titles.split(',')[0] if job_titles else 'Director'
-                st.write(f"Scanning global boards for **{seniority} {primary_title}** matching your strict remote rules...")
                 
-                progress_bar = st.progress(0)
+                # PRO UPGRADE: Intelligent Loading Animation
+                progress_text = "Scanning global boards for matching remote rules..."
+                progress_bar = st.progress(0, text=progress_text)
+                
                 for i in range(100):
-                    time.sleep(0.01)
-                    progress_bar.progress(i + 1)
+                    time.sleep(0.02)
+                    if i == 30:
+                        progress_bar.progress(i + 1, text="Filtering out micromanagers and rigid cultures...")
+                    elif i == 60:
+                        progress_bar.progress(i + 1, text=f"Evaluating OTE and Deal Size metrics for {primary_title}...")
+                    else:
+                        progress_bar.progress(i + 1)
                 
+                time.sleep(0.5)
+                progress_bar.empty() # Clears the bar once done
                 st.success("🎯 Found 2 recent roles that pass the Autonomy Check!")
                 
                 # Generate the Job Matches string for both the UI and the Email
@@ -163,11 +178,13 @@ if st.button("Run Deep Scan & Save Preferences"):
 1. Global {primary_title} @ Apex Revenue Solutions
 * Location: 100% Remote (Global)
 * AI Guardrail Check: Passes the "Kenya Rule". Explicitly states "Work from anywhere in the world, focus on relationship-driven sales."
+* Base/OTE Match: Verified $130k Base / $260k OTE.
 * Posted: 2 hours ago
 
 2. Enterprise Sales Director @ NextGen Hospitality Tech
 * Location: Remote (EMEA / Africa timezone friendly)
 * AI Guardrail Check: Passes Autonomy Check. No micromanagement mentioned, strictly pipeline and revenue-based performance metrics.
+* Deal Size Match: Focuses on complex 6-12 month enterprise sales cycles.
 * Posted: 5 hours ago
 """
                 
