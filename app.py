@@ -1,71 +1,63 @@
 import streamlit as st
 import pdfplumber
-import re
+import os
+from dotenv import load_dotenv
+from supabase import create_client
 
-# --- ⚙️ CORE LOGIC: THE DEEP SCAN ---
-def extract_resume_data(file):
-    """Extracts text from PDF and cleans up white space."""
-    text = ""
-    try:
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                content = page.extract_text()
-                if content:
-                    text += content
-        return text
-    except Exception as e:
-        return f"Error reading PDF: {e}"
+# --- DATABASE SETUP ---
+load_dotenv()
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-def generate_career_dna(text, linkedin_url):
-    """
-    SMART Goal: Maps 20+ years of history.
-    This mimics the logic in resume_parser.py from the repo.
-    """
-    # Look for years of experience
-    years_match = re.search(r"(\d+)\+?\s*years", text.lower())
-    seniority = f"{years_match.group(1)}+ Years" if years_match else "Executive (20+ yrs)"
-    
-    # Identify Core Track
-    track = "Management/Operations" if "manager" in text.lower() or "director" in text.lower() else "Specialist"
-    
-    return {
-        "Seniority": seniority,
-        "Track": track,
-        "LinkedIn": linkedin_url
-    }
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+else:
+    supabase = None
 
-# --- 🎨 INTERFACE ---
-st.set_page_config(page_title="Steve's AI Agent", layout="centered")
+# --- UI: SIDEBAR SETTINGS ---
+st.sidebar.header("⚙️ Settings")
+contact_email = st.sidebar.text_input("Contact Email", value="steve@example.com")
+mobile_number = st.sidebar.text_input("Mobile for SMS Alerts", placeholder="(555) 555-5555")
+
+# --- UI: MAIN PAGE ---
 st.title("🤖 Steve's Personal Job Agent")
-st.info("Phase 1: Deep Scan & Identity Verification")
+st.subheader("Phase 1: Identity Verification")
 
-# Sidebar for persistent settings
-with st.sidebar:
-    st.header("Settings")
-    email = st.text_input("Contact Email", value="steve@example.com")
-    phone = st.text_input("Mobile for SMS Alerts")
+uploaded_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+linkedin_url = st.text_input("LinkedIn Profile URL", placeholder="https://linkedin.com/in/steve-example")
 
-# Main Onboarding
-uploaded_file = st.file_uploader("Upload Resume (PDF)", type="pdf")
-linkedin_link = st.text_input("LinkedIn Profile URL")
+st.subheader("Phase 2: Target Preferences")
+job_titles = st.text_input("Target Job Titles", placeholder="e.g., Sales Manager, Director, VP")
+locations = st.text_input("Preferred Locations", placeholder="e.g., Remote, New York, London")
 
-if st.button("Run Deep Scan"):
-    if uploaded_file and linkedin_link:
-        with st.spinner("Analyzing 20 years of professional footprint..."):
-            # 1. Parse the PDF
-            raw_text = extract_resume_data(uploaded_file)
-            
-            # 2. Build the DNA
-            dna = generate_career_dna(raw_text, linkedin_link)
-            
-            # 3. Success UI
-            st.success("✅ Deep Scan Complete!")
-            c1, c2 = st.columns(2)
-            c1.metric("Seniority Level", dna["Seniority"])
-            c2.metric("Career Track", dna["Track"])
-            
-            st.write(f"🔗 **LinkedIn Linked:** {dna['LinkedIn']}")
-            st.warning(f"Verification: A test email and text will be sent to {email} shortly.")
-            st.balloons()
+# --- ACTION: THE SCANNER ---
+if st.button("Run Deep Scan & Save Preferences"):
+    if uploaded_file is not None and job_titles and locations:
+        if supabase:
+            try:
+                with st.spinner("Injecting resume and preferences into the AI Brain..."):
+                    # 1. Grab PDF data
+                    file_bytes = uploaded_file.getvalue()
+                    
+                    # 2. Upload directly to Supabase
+                    supabase.storage.from_("resumes").upload(
+                        "resume.pdf", 
+                        file_bytes, 
+                        {"upsert": "true"}
+                    )
+                
+                # 3. Show Success Message
+                st.success("✅ Profile securely injected into the AI Brain!")
+                
+                # 4. Display the extracted DNA summary
+                st.info("🧬 **Career DNA & Targets Locked**")
+                st.write(f"- **Target Roles:** {job_titles}")
+                st.write(f"- **Locations:** {locations}")
+                st.write(f"- **Contact Target:** {contact_email}")
+
+            except Exception as e:
+                st.error(f"Database Error: Could not upload file. Details: {e}")
+        else:
+            st.error("🚨 Supabase Connection Failed: Your .env file is missing the URL or Key.")
     else:
-        st.error("Please provide both a Resume and LinkedIn link to proceed.")
+        st.warning("⚠️ Please upload a resume and fill out your job/location targets.")
