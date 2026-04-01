@@ -11,6 +11,12 @@ from google import genai
 # --- PRO UPGRADE: PREMIUM PAGE LAYOUT ---
 st.set_page_config(page_title="Steve's AI Agent", page_icon="👔", layout="centered")
 
+# --- INITIALIZE SESSION STATE (THE APP'S MEMORY) ---
+if "job_results" not in st.session_state:
+    st.session_state.job_results = []
+if "scan_message" not in st.session_state:
+    st.session_state.scan_message = ""
+
 # --- DATABASE, EMAIL & API SETUP ---
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -33,14 +39,14 @@ else:
     ai_client = None
 
 # --- PHASE 2: LIVE ENGINES ---
-def get_live_jobs(query):
+def get_live_jobs(query, limit=5):
     """Scrapes live remote jobs using SerpApi"""
     if not SERPAPI_KEY: return []
     safe_query = query.replace(" ", "+") + "+Remote"
     url = f"https://serpapi.com/search.json?engine=google_jobs&q={safe_query}&hl=en&api_key={SERPAPI_KEY}"
     try:
         res = requests.get(url).json()
-        return res.get("jobs_results", [])[:5] 
+        return res.get("jobs_results", [])[:limit] 
     except Exception as e:
         print(f"Scraper Error: {e}")
         return []
@@ -64,7 +70,7 @@ def grade_job_with_ai(job, dealbreakers, target_ote, industry_keywords):
     Company: {company}
     Description: {desc[:2500]}
 
-    First, decide if this job is a 4 or 5-star overall match. If it is 1, 2, or 3 stars (e.g., micromanagement, low pay, fake remote), strictly return ONLY the word "FAIL".
+    First, decide if this job is a 4 or 5-star overall match. If it is 1, 2, or 3 stars, strictly return ONLY the word "FAIL".
     
     If it passes, return an Executive Scorecard EXACTLY in this format using a strict 1 to 5 scale:
     
@@ -77,7 +83,7 @@ def grade_job_with_ai(job, dealbreakers, target_ote, industry_keywords):
     * 🤝 **Sales Support & Role ([Score]/5):** [1 sentence on if they have BDR support or if it's full-cycle]
     
     **🎯 Keyword Matches**
-    * [Identify which of the specific Target Industry Keywords were found in the text, and briefly how they are used. If none, say "No specific target keywords explicitly mentioned."]
+    * [Identify which of the specific Target Industry Keywords were found in the text. If none, say "No specific target keywords explicitly mentioned."]
     """
     try:
         response = ai_client.models.generate_content(
@@ -92,7 +98,7 @@ def grade_job_with_ai(job, dealbreakers, target_ote, industry_keywords):
         print(f"AI Error: {e}")
         return None
 
-def send_confirmation_email(to_email, target_jobs, dealbreakers, job_matches):
+def send_confirmation_email(to_email, target_jobs, job_matches, custom_subject="🤖 AI Job Bot: Live Executive Rubrics Found!"):
     """Sends an automated HTML email via Gmail SMTP"""
     if not EMAIL_SENDER or not EMAIL_PASSWORD:
         return False
@@ -101,22 +107,22 @@ def send_confirmation_email(to_email, target_jobs, dealbreakers, job_matches):
     <html>
     <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
     <h2 style="color: #2E86C1;">🤖 AI Job Bot: Executive Scan Complete</h2>
-    <p>Hey Steve,</p>
-    <p>Your AI Job Bot is active and scanning.</p>
+    <p>Hey there,</p>
+    <p>Here are the latest AI-vetted job matches based on the Executive target profile.</p>
     <p><b>Target Roles:</b> {target_jobs}</p>
     <hr>
-    <p>The engine scanned the global boards, filtered out the micromanagers, and generated your custom rubrics. Here are your live, AI-vetted matches:</p>
+    <p>The engine scanned the global boards, filtered out the micromanagers, and generated custom rubrics:</p>
     <br>
     {job_matches}
     <br>
     <hr>
-    <p><i>- Your Personal AI Agent</i></p>
+    <p><i>- Powered by Steve's AI Agent</i></p>
     </body>
     </html>
     """
     
     msg = MIMEText(email_body, 'html')
-    msg['Subject'] = "🤖 AI Job Bot: Live Executive Rubrics Found!"
+    msg['Subject'] = custom_subject
     msg['From'] = EMAIL_SENDER
     msg['To'] = to_email
 
@@ -207,85 +213,138 @@ with col4:
                                    placeholder="e.g., Salesforce, Marriott Corporate, Toast... \n\nIf these companies post a role, the AI will alert you immediately.",
                                    height=110)
 
-# --- ACTION: THE LIVE SCANNER ---
-if st.button("Run Deep Scan & Save Preferences"):
-    if uploaded_file is not None and job_titles:
-        if supabase:
-            try:
-                with st.spinner("Injecting executive profile and strict guardrails into the AI Brain..."):
-                    file_bytes = uploaded_file.getvalue()
-                    supabase.storage.from_("resumes").upload(uploaded_file.name, file_bytes, {"upsert": "true"})
-                
-                st.success("✅ Executive profile saved.")
-                st.divider()
-                
-                st.subheader("📡 Live Market Radar (Instant Results)")
-                primary_title = job_titles.split(',')[0] if job_titles else 'Director'
-                
-                with st.spinner(f"Scraping global boards for {primary_title} roles and generating strict 5-star rubrics..."):
-                    raw_jobs = get_live_jobs(primary_title)
-                    valid_matches = []
-                    email_html_matches = []
-                    
-                    if not raw_jobs:
-                        job_matches_text = "No remote jobs found matching that title right now. We will check again tomorrow!"
-                    else:
-                        for job in raw_jobs:
-                            # Send to Gemini
-                            ai_summary = grade_job_with_ai(job, dealbreakers, target_ote, industry_keywords)
-                            
-                            if ai_summary:
-                                title = job.get('title', 'Unknown Title')
-                                company = job.get('company_name', 'Unknown Company')
-                                location = job.get('location', 'Remote')
-                                
-                                apply_options = job.get('apply_options', [])
-                                apply_link = apply_options[0].get('link') if apply_options else f"https://www.google.com/search?q={title.replace(' ', '+')}+{company.replace(' ', '+')}+job"
-                                
-                                # 1. Streamlit UI Format
-                                match_info = f"### {title} @ {company}\n"
-                                match_info += f"* **Location:** {location}\n"
-                                match_info += f"{ai_summary}\n"
-                                match_info += f"\n* **Apply Here:** [Click to Apply]({apply_link})\n"
-                                match_info += "---\n"
-                                valid_matches.append(match_info)
-                                
-                                # 2. Email HTML Format (Converting markdown to clean HTML)
-                                html_info = f"<h3 style='color:#2C3E50;'>{title} @ {company}</h3>"
-                                html_info += f"<p><b>Location:</b> {location}</p>"
-                                
-                                # Simple parser to make the AI Markdown look beautiful in email
-                                for line in ai_summary.split('\n'):
-                                    if line.startswith('**') and not line.startswith('** '):
-                                        html_info += f"<h4 style='color:#34495E; margin-bottom: 2px;'>{line.replace('**', '')}</h4>"
-                                    elif line.startswith('* '):
-                                        clean_line = line[2:].replace('**', '<b>').replace('**', '</b>')
-                                        html_info += f"<li style='margin-bottom: 5px;'>{clean_line}</li>"
-                                    elif line.strip() != "":
-                                        html_info += f"<p>{line}</p>"
-                                        
-                                html_info += f"<br><a href='{apply_link}' style='display:inline-block; padding:10px 15px; background-color:#28B463; color:white; text-decoration:none; border-radius:5px;'><b>Apply Here</b></a><br><br><hr>"
-                                email_html_matches.append(html_info)
-                        
-                        if valid_matches:
-                            job_matches_text = "\n".join(valid_matches)
-                            email_jobs_text = "".join(email_html_matches)
-                        else:
-                            job_matches_text = "Scanned 5 recent remote jobs, but none passed your strict guardrails (all were 3 stars or below). Protecting your inbox from micromanagement!"
-                            email_jobs_text = f"<p>{job_matches_text}</p>"
-                
-                st.markdown(job_matches_text)
-                
-                if valid_matches:
-                    st.success("🎯 High-tier matches found! Dispatching detailed rubrics to your inbox...")
-                else:
-                    st.info("🛡️ Scan complete. No jobs passed the filter today.")
+# --- ACTION: DUAL BUTTON SETUP ---
+st.divider()
+st.subheader("🚀 Command Center")
 
-                send_confirmation_email(contact_email, job_titles, dealbreakers, email_jobs_text)
-                    
-            except Exception as e:
-                st.error(f"Error during scan: {e}")
-        else:
-            st.error("🚨 Supabase Connection Failed: Your .env file is missing.")
+btn_col1, btn_col2 = st.columns(2)
+
+with btn_col1:
+    instant_feed_clicked = st.button("⚡ Instant Jobs Now (Quick Feed)", use_container_width=True)
+
+with btn_col2:
+    deep_scan_clicked = st.button("Run Deep Scan & Save Preferences", use_container_width=True)
+
+
+# --- LOGIC: FETCHING JOBS (TRIGGERS ON EITHER BUTTON) ---
+if instant_feed_clicked or deep_scan_clicked:
+    if job_titles:
+        # 1. Clear memory for the new scan
+        st.session_state.job_results = []
+        st.session_state.scan_message = ""
+        
+        primary_title = job_titles.split(',')[0] if job_titles else 'Director'
+        limit = 3 if instant_feed_clicked else 5
+        
+        with st.spinner(f"Scraping the global market for {primary_title} roles..."):
+            raw_jobs = get_live_jobs(primary_title, limit=limit)
+            
+            if not raw_jobs:
+                st.session_state.scan_message = "No remote jobs found matching that title right now."
+            else:
+                for job in raw_jobs:
+                    ai_summary = grade_job_with_ai(job, dealbreakers, target_ote, industry_keywords)
+                    if ai_summary:
+                        title = job.get('title', 'Unknown Title')
+                        company = job.get('company_name', 'Unknown Company')
+                        location = job.get('location', 'Remote')
+                        apply_options = job.get('apply_options', [])
+                        apply_link = apply_options[0].get('link') if apply_options else f"https://www.google.com/search?q={title.replace(' ', '+')}+{company.replace(' ', '+')}+job"
+                        
+                        # Markdown Format (for the screen)
+                        match_info = f"### {title} @ {company}\n"
+                        match_info += f"* **Location:** {location}\n"
+                        match_info += f"{ai_summary}\n"
+                        match_info += f"\n* **Apply Here:** [Click to Apply]({apply_link})\n"
+                        
+                        # HTML Format (for the email)
+                        html_info = f"<h3 style='color:#2C3E50;'>{title} @ {company}</h3>"
+                        html_info += f"<p><b>Location:</b> {location}</p>"
+                        for line in ai_summary.split('\n'):
+                            if line.startswith('**') and not line.startswith('** '):
+                                html_info += f"<h4 style='color:#34495E; margin-bottom: 2px;'>{line.replace('**', '')}</h4>"
+                            elif line.startswith('* '):
+                                clean_line = line[2:].replace('**', '<b>').replace('**', '</b>')
+                                html_info += f"<li style='margin-bottom: 5px;'>{clean_line}</li>"
+                            elif line.strip() != "":
+                                html_info += f"<p>{line}</p>"
+                        html_info += f"<br><a href='{apply_link}' style='display:inline-block; padding:10px 15px; background-color:#28B463; color:white; text-decoration:none; border-radius:5px;'><b>Apply Here</b></a><br><br><hr>"
+                        
+                        # Save to memory!
+                        st.session_state.job_results.append({
+                            "title": title,
+                            "company": company,
+                            "ui_text": match_info,
+                            "html_text": html_info
+                        })
+                
+                if st.session_state.job_results:
+                    st.session_state.scan_message = "✅ Scan complete! Curated jobs loaded below."
+                else:
+                    st.session_state.scan_message = "🛡️ Scanned recent jobs, but none passed your strict AI guardrails. No junk allowed on your feed."
+
+        # If it was a Deep Scan, we still run the database upload and auto-email
+        if deep_scan_clicked:
+            if supabase and uploaded_file is not None:
+                file_bytes = uploaded_file.getvalue()
+                supabase.storage.from_("resumes").upload(uploaded_file.name, file_bytes, {"upsert": "true"})
+            
+            if st.session_state.job_results:
+                all_html = "".join([j["html_text"] for j in st.session_state.job_results])
+                send_confirmation_email(contact_email, job_titles, all_html)
+                st.session_state.scan_message += " (Sent full backup to your inbox!)"
     else:
-        st.warning("⚠️ Please upload a resume and fill out at least your Target Job Titles.")
+        st.warning("⚠️ Please fill out your Target Job Titles first.")
+
+
+# --- UI: DISPLAY RESULTS & FORWARDING CAPABILITY ---
+if st.session_state.scan_message:
+    st.info(st.session_state.scan_message)
+
+# Only show this section if we have jobs in memory
+if st.session_state.job_results:
+    st.divider()
+    st.subheader("📋 Your Curated Job Feed")
+    
+    selected_for_forwarding = []
+    
+    # Render jobs and their checkboxes
+    for idx, job_data in enumerate(st.session_state.job_results):
+        st.markdown(job_data["ui_text"])
+        
+        # Checkbox logic
+        is_selected = st.checkbox(f"📥 Select {job_data['title']} to forward", value=True, key=f"chk_{idx}")
+        if is_selected:
+            selected_for_forwarding.append(job_data)
+            
+        st.markdown("---")
+        
+    # --- UI: THE FORWARDING ENGINE ---
+    st.subheader("📤 Share / Forward Selected Jobs")
+    st.markdown("Want to send specific jobs to a colleague or alternate email? Uncheck any jobs you don't want to send above, enter an email below, and hit forward.")
+    
+    fwd_col1, fwd_col2 = st.columns([2, 1])
+    with fwd_col1:
+        forward_email = st.text_input("Recipient Email:", placeholder="colleague@example.com")
+    with fwd_col2:
+        st.markdown("<br>", unsafe_allow_html=True) # visual alignment hack
+        forward_button = st.button("📨 Forward Selected Jobs", use_container_width=True)
+        
+    if forward_button:
+        if not selected_for_forwarding:
+            st.warning("⚠️ Please select at least one job above to forward.")
+        elif not forward_email:
+            st.warning("⚠️ Please enter a recipient email.")
+        else:
+            with st.spinner(f"Forwarding {len(selected_for_forwarding)} jobs to {forward_email}..."):
+                fwd_html = "".join([j["html_text"] for j in selected_for_forwarding])
+                success = send_confirmation_email(
+                    to_email=forward_email, 
+                    target_jobs=job_titles, 
+                    job_matches=fwd_html, 
+                    custom_subject="FWD: 🤖 AI Job Bot Matches"
+                )
+                if success:
+                    st.success(f"✅ Successfully forwarded {len(selected_for_forwarding)} jobs to {forward_email}!")
+                else:
+                    st.error("❌ Failed to forward email. Check your SMTP settings.")
