@@ -7,6 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# --- USER CONTROL PANEL ---
+# Set this to True if you ONLY want Strategic/High-level roles.
+# Set this to False to see both Strategic and Standard AE roles.
+ONLY_STRATEGIC = False 
+# --------------------------
+
 def send_email(to_email, subject, html_content):
     sender = os.getenv("EMAIL_SENDER")
     password = os.getenv("EMAIL_APP_PASSWORD")
@@ -30,7 +36,7 @@ def send_email(to_email, subject, html_content):
         return False
 
 def run_autopilot():
-    print("🚀 Starting Flexible AI Job Agent...")
+    print(f"🚀 Starting AI Job Agent (Strict Filter: {ONLY_STRATEGIC})...")
     
     api_key = os.getenv("GEMINI_API_KEY")
     serp_key = os.getenv("SERPAPI_KEY")
@@ -50,45 +56,50 @@ def run_autopilot():
         
         valid_matches = []
         for job in jobs:
-            title = job.get("title")
-            company = job.get("company_name")
+            title, company = job.get("title"), job.get("company_name")
             desc = job.get("description", "")
             link = job.get("related_links", [{}])[0].get("link", "#")
             
             prompt = f"""
             Analyze this job: {title} at {company}.
-            Goal: Identify roles for an experienced Sales Executive.
-            1. Priority: Strategic, Senior, or Enterprise levels.
-            2. Secondary: Standard Account Executive roles (Mid-market, etc).
+            1. Label as [STRATEGIC] if it is a Senior, Enterprise, or Strategic level role.
+            2. Label as [PROFESSIONAL] if it is a standard Account Executive role.
             3. Preference: Remote or Hybrid.
             Job Description: {desc}
-            If this is a professional sales role, provide a 2-sentence summary. 
-            Label it as [STRATEGIC] if it's a high-level role, or [PROFESSIONAL] if it's a standard AE role.
-            If it is clearly entry-level, retail, or unrelated, start with 'FAIL'.
+            If this fits either category, give a 2-sentence summary. If not, start with 'FAIL'.
             """
             
             res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-            
-            if not res.text.startswith("FAIL"):
-                print(f"✅ Match: {title} @ {company}")
+            ai_text = res.text.strip()
+
+            if not ai_text.startswith("FAIL"):
+                # --- FILTER LOGIC ---
+                is_strategic = "[STRATEGIC]" in ai_text
+                
+                # If the user wants ONLY strategic, skip the standard ones
+                if ONLY_STRATEGIC and not is_strategic:
+                    print(f"⏭️ Filtering out standard role: {title}")
+                    continue
+                
+                print(f"✅ Match Found: {title}")
+                color = "#2E86C1" if is_strategic else "#566573"
                 match_html = f"""
                 <div style="border-bottom: 1px solid #ddd; padding: 15px; margin-bottom: 10px;">
-                    <h3 style="margin-top: 0;">{title} @ {company}</h3>
-                    <p style="color: #444; line-height: 1.4;">{res.text.strip()}</p>
-                    <a href="{link}" style="color: #1A73E8; text-decoration: none; font-weight: bold;">View Opportunity →</a>
+                    <h3 style="color: {color}; margin-top: 0;">{ai_text[:12]} {title} @ {company}</h3>
+                    <p style="color: #444;">{ai_text}</p>
+                    <a href="{link}" style="color: #1A73E8; font-weight: bold;">View Opportunity →</a>
                 </div>
                 """
                 valid_matches.append(match_html)
-            else:
-                print(f"❌ Skipped: {title}")
 
         if valid_matches:
-            print(f"🎯 Found {len(valid_matches)} matches! Sending email...")
-            report = f"<html><body style='font-family: sans-serif; color: #333;'><h2>🌅 Morning Executive Brief</h2><p>I found {len(valid_matches)} roles for you:</p><hr>{''.join(valid_matches)}</body></html>"
-            if send_email(contact_email, "🌅 Your 5:00 AM Executive Job Brief", report):
-                print("📧 Email sent successfully.")
+            print(f"🎯 Sending {len(valid_matches)} matches...")
+            header = "Strict Strategic Brief" if ONLY_STRATEGIC else "Executive Job Brief"
+            report = f"<html><body><h2>🌅 {header}</h2>{''.join(valid_matches)}</body></html>"
+            send_email(contact_email, f"🌅 {header}", report)
         else:
-            print("🛡️ Scan complete. No matches found today.")
+            print("🛡️ No matches found for current filter settings.")
+
     except Exception as e:
         print(f"⚠️ Error: {e}")
 
