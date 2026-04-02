@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- USER CONTROL PANEL ---
-# Set this to True if you ONLY want Strategic/High-level roles.
-# Set this to False to see both Strategic and Standard AE roles.
+# Set to True to ONLY send Strategic/High-level roles.
+# Set to False to include all professional Account Executive roles.
 ONLY_STRATEGIC = False 
 # --------------------------
 
@@ -26,6 +26,7 @@ def send_email(to_email, subject, html_content):
     msg["To"] = to_email
 
     try:
+        # Port 587 with STARTTLS is the most reliable for GitHub Actions
         with smtplib.SMTP("smtp.gmail.com", 587) as server:
             server.starttls() 
             server.login(sender, password)
@@ -43,6 +44,7 @@ def run_autopilot():
     contact_email = os.getenv("EMAIL_SENDER")
     client = genai.Client(api_key=api_key)
 
+    # Search for Strategic Account Executive roles
     params = {
         "engine": "google_jobs",
         "q": "Strategic Account Executive",
@@ -56,16 +58,19 @@ def run_autopilot():
         
         valid_matches = []
         for job in jobs:
-            title, company = job.get("title"), job.get("company_name")
+            title = job.get("title")
+            company = job.get("company_name")
             desc = job.get("description", "")
             link = job.get("related_links", [{}])[0].get("link", "#")
             
+            # AI Grading Logic
             prompt = f"""
             Analyze this job: {title} at {company}.
             1. Label as [STRATEGIC] if it is a Senior, Enterprise, or Strategic level role.
             2. Label as [PROFESSIONAL] if it is a standard Account Executive role.
             3. Preference: Remote or Hybrid.
             Job Description: {desc}
+            
             If this fits either category, give a 2-sentence summary. If not, start with 'FAIL'.
             """
             
@@ -73,32 +78,46 @@ def run_autopilot():
             ai_text = res.text.strip()
 
             if not ai_text.startswith("FAIL"):
-                # --- FILTER LOGIC ---
                 is_strategic = "[STRATEGIC]" in ai_text
                 
-                # If the user wants ONLY strategic, skip the standard ones
+                # Apply the user toggle
                 if ONLY_STRATEGIC and not is_strategic:
                     print(f"⏭️ Filtering out standard role: {title}")
                     continue
                 
-                print(f"✅ Match Found: {title}")
+                # Rating and Visuals
+                stars = "⭐⭐⭐⭐⭐" if is_strategic else "⭐⭐⭐"
                 color = "#2E86C1" if is_strategic else "#566573"
+                
+                print(f"✅ Match Found: {title} @ {company}")
                 match_html = f"""
                 <div style="border-bottom: 1px solid #ddd; padding: 15px; margin-bottom: 10px;">
-                    <h3 style="color: {color}; margin-top: 0;">{ai_text[:12]} {title} @ {company}</h3>
-                    <p style="color: #444;">{ai_text}</p>
-                    <a href="{link}" style="color: #1A73E8; font-weight: bold;">View Opportunity →</a>
+                    <p style="margin: 0; font-size: 12px; color: #888;">{stars}</p>
+                    <h3 style="color: {color}; margin-top: 5px;">{title} @ {company}</h3>
+                    <p style="color: #444; line-height: 1.5;">{ai_text}</p>
+                    <a href="{link}" style="color: #1A73E8; font-weight: bold; text-decoration: none;">View Opportunity →</a>
                 </div>
                 """
                 valid_matches.append(match_html)
 
         if valid_matches:
-            print(f"🎯 Sending {len(valid_matches)} matches...")
-            header = "Strict Strategic Brief" if ONLY_STRATEGIC else "Executive Job Brief"
-            report = f"<html><body><h2>🌅 {header}</h2>{''.join(valid_matches)}</body></html>"
-            send_email(contact_email, f"🌅 {header}", report)
+            print(f"🎯 Found {len(valid_matches)} matches! Sending email...")
+            header_text = "Strict Strategic Brief" if ONLY_STRATEGIC else "Executive Job Brief"
+            report = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <h2 style="color: #2C3E50;">🌅 {header_text}</h2>
+                <p>I found {len(valid_matches)} roles for you this morning:</p>
+                <hr style="border: 0; border-top: 1px solid #eee;">
+                {"".join(valid_matches)}
+                <p style="font-size: 11px; color: #999; margin-top: 20px;">Powered by your AI Job Agent</p>
+            </body>
+            </html>
+            """
+            if send_email(contact_email, f"🌅 {header_text}", report):
+                print("📧 Email sent successfully.")
         else:
-            print("🛡️ No matches found for current filter settings.")
+            print("🛡️ Scan complete. No matches found for current filter settings.")
 
     except Exception as e:
         print(f"⚠️ Error: {e}")
