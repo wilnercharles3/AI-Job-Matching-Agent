@@ -2,23 +2,24 @@ name: Daily Job Scan Autopilot
 
 on:
   schedule:
-    - cron: '0 10 * * *' # Runs every day at 10:00 AM UTC (Morning for Steve)
-  workflow_dispatch: # Allows you to run it manually from GitHub for testing
+    - cron: '0 9 * * *' # 9:00 AM UTC is 5:00 AM EST
+  workflow_dispatch: # Allows manual trigger
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Upgraded to v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Upgraded to v5
         with:
           python-version: '3.11'
 
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install google-genai requests python-dotenv
 
       - name: Run Autopilot
