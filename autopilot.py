@@ -1,26 +1,43 @@
 import os
 import requests
+import smtplib
+from email.mime.text import MIMEText
 from google import genai
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def run_autopilot():
-    print("🚀 Starting Independent Autopilot Scan...")
+def send_email(to_email, subject, html_content):
+    sender = os.getenv("EMAIL_SENDER")
+    password = os.getenv("EMAIL_APP_PASSWORD")
+    if not sender or not password:
+        print("❌ Email credentials missing.")
+        return False
     
-    # 1. Credentials
+    msg = MIMEText(html_content, "html")
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = to_email
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender, password)
+            server.sendmail(sender, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
+        return False
+
+def run_autopilot():
+    print("🚀 Starting AI Job Agent (Verification Mode)...")
+    
     api_key = os.getenv("GEMINI_API_KEY")
     serp_key = os.getenv("SERPAPI_KEY")
+    contact_email = os.getenv("EMAIL_SENDER")
     client = genai.Client(api_key=api_key)
 
-    # 2. Search for Jobs (Strategic Account Executive)
-    print("📡 Searching for roles...")
-    params = {
-        "engine": "google_jobs",
-        "q": "Strategic Account Executive",
-        "api_key": serp_key,
-        "num": 10
-    }
+    # 1. Search
+    params = {"engine": "google_jobs", "q": "Strategic Account Executive", "api_key": serp_key, "num": 5}
     
     try:
         response = requests.get("https://serpapi.com/search", params=params)
@@ -28,22 +45,27 @@ def run_autopilot():
         
         valid_matches = []
         for job in jobs:
-            title = job.get("title")
-            company = job.get("company_name")
+            title, company = job.get("title"), job.get("company_name")
             desc = job.get("description", "")
             
-            # AI Grading logic
-            prompt = f"Grade this job: {title} at {company}. Req: 100% Remote, Kenya-friendly. Desc: {desc}. If match, give 2-sentence summary. If not, start with 'FAIL'."
+            # --- BROAD FILTER FOR TESTING ---
+            criteria = "Any professional role is a match for this test."
+            
+            prompt = f"Grade this: {title} @ {company}. Req: {criteria}. Desc: {desc}. If match, give 1-sentence summary. If not, start with 'FAIL'."
             res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
             
             if not res.text.startswith("FAIL"):
-                print(f"✅ Match: {title} @ {company}")
+                print(f"✅ Test Match Found: {title}")
                 valid_matches.append(f"<h3>{title} @ {company}</h3><p>{res.text}</p><hr>")
 
+        # 2. Dispatch
         if valid_matches:
-            print(f"🎯 Found {len(valid_matches)} matches. Automation complete.")
+            print("🎯 Found matches! Dispatching test email...")
+            report = "<h2>🌅 Morning Executive Brief (TEST)</h2>" + "".join(valid_matches)
+            if send_email(contact_email, "🌅 TEST: Your Executive Job Brief", report):
+                print("📧 Email sent successfully.")
         else:
-            print("🛡️ No elite matches found today.")
+            print("🛡️ No jobs found even with broad filters.")
 
     except Exception as e:
         print(f"⚠️ Error: {e}")
