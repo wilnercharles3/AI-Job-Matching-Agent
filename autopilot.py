@@ -29,15 +29,20 @@ def send_email(to_email, subject, html_content):
         return False
 
 def run_autopilot():
-    print("🚀 Starting AI Job Agent (Verification Mode)...")
+    print("🚀 Starting Balanced AI Job Agent...")
     
     api_key = os.getenv("GEMINI_API_KEY")
     serp_key = os.getenv("SERPAPI_KEY")
     contact_email = os.getenv("EMAIL_SENDER")
     client = genai.Client(api_key=api_key)
 
-    # 1. Search
-    params = {"engine": "google_jobs", "q": "Strategic Account Executive", "api_key": serp_key, "num": 5}
+    # 1. Market Search
+    params = {
+        "engine": "google_jobs",
+        "q": "Strategic Account Executive",
+        "api_key": serp_key,
+        "num": 15 # Scrutinizing more jobs to find the best ones
+    }
     
     try:
         response = requests.get("https://serpapi.com/search", params=params)
@@ -45,30 +50,60 @@ def run_autopilot():
         
         valid_matches = []
         for job in jobs:
-            title, company = job.get("title"), job.get("company_name")
+            title = job.get("title")
+            company = job.get("company_name")
             desc = job.get("description", "")
+            link = job.get("related_links", [{}])[0].get("link", "#")
             
-            # --- BROAD FILTER FOR TESTING ---
-            criteria = "Any professional role is a match for this test."
+            # --- UPDATED FLEXIBLE CRITERIA ---
+            # Removed Kenya. Softened Remote to include "Hybrid" or "Remote-First"
+            prompt = f"""
+            Grade this job: {title} at {company}.
+            Target Profile: Strategic Account Executive.
+            Preferences: Prefers Remote, but open to strong Hybrid or 'Remote-First' roles.
+            Job Description: {desc}
             
-            prompt = f"Grade this: {title} @ {company}. Req: {criteria}. Desc: {desc}. If match, give 1-sentence summary. If not, start with 'FAIL'."
+            If this is a high-quality professional match, give a 2-sentence summary of the opportunity.
+            If it is clearly a bad match (e.g., entry level or strictly on-site in a far city), start with 'FAIL'.
+            """
+            
             res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
             
             if not res.text.startswith("FAIL"):
-                print(f"✅ Test Match Found: {title}")
-                valid_matches.append(f"<h3>{title} @ {company}</h3><p>{res.text}</p><hr>")
+                print(f"✅ Match Found: {title} @ {company}")
+                match_html = f"""
+                <div style="border-bottom: 1px solid #ddd; padding: 20px; margin-bottom: 10px;">
+                    <h3 style="color: #2E86C1; margin-bottom: 5px;">{title} @ {company}</h3>
+                    <p style="color: #333; line-height: 1.5;">{res.text}</p>
+                    <a href="{link}" style="background-color: #28B463; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; display: inline-block;"><b>View Application</b></a>
+                </div>
+                """
+                valid_matches.append(match_html)
+            else:
+                print(f"❌ Skipped: {title}")
 
         # 2. Dispatch
         if valid_matches:
-            print("🎯 Found matches! Dispatching test email...")
-            report = "<h2>🌅 Morning Executive Brief (TEST)</h2>" + "".join(valid_matches)
-            if send_email(contact_email, "🌅 TEST: Your Executive Job Brief", report):
+            print(f"🎯 Found {len(valid_matches)} high-quality matches! Sending email...")
+            report = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif;">
+                <h2 style="color: #2C3E50;">🌅 Steve's Morning Executive Brief</h2>
+                <p>I've scanned the current market and hand-picked these {len(valid_matches)} roles for you:</p>
+                <hr style="border: 0; border-top: 1px solid #eee;">
+                {"".join(valid_matches)}
+                <br>
+                <p style="font-size: 11px; color: #999;"><i>Powered by your AI Job Matching Agent.</i></p>
+            </body>
+            </html>
+            """
+            if send_email(contact_email, "🌅 Your 5:00 AM Executive Job Brief", report):
                 print("📧 Email sent successfully.")
         else:
-            print("🛡️ No jobs found even with broad filters.")
+            print("🛡️ Scan complete. No matches found with the current filters.")
 
     except Exception as e:
-        print(f"⚠️ Error: {e}")
+        print(f"⚠️ Error during autopilot: {e}")
 
 if __name__ == "__main__":
     run_autopilot()
